@@ -193,9 +193,11 @@ func (P *ParseRedo) Parse(LogFileList []string) error {
 func (P *ParseRedo) ParseRedoBlockData(data []byte) error {
 	var pos uint64
 	for {
+
 		if (int64(len(data)) - int64(pos)) < 5 {
 			break
 		}
+
 		if (uint64(len(data)) - pos) < 5 {
 			break
 		}
@@ -222,8 +224,8 @@ func (P *ParseRedo) ParseRedoBlockData(data []byte) error {
 			if err != nil {
 				logs.Error("get log record space id failed, the error is ", err)
 				return err
-
 			}
+
 			// Get the page no
 			PageNo, num, err := utils.MatchParseCompressed(data, pos)
 			pos += num
@@ -257,7 +259,6 @@ func (P *ParseRedo) ParseRedoBlockData(data []byte) error {
 			if err != nil {
 				break
 			}
-
 		case MLOG_REC_SEC_DELETE_MARK:
 			logs.Debug("start parse MLOG_REC_SEC_DELETE_MARK log record")
 			P.MLOG_REC_SEC_DELETE_MARK(data, &pos)

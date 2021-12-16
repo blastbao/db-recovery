@@ -36,26 +36,26 @@ type ParseIB struct {
 
 // Store the table structure info.
 type Tables struct {
-	DBName    string
-	TableName string
-	Columns   []Columns
-	Indexes   map[uint64]Indexes
-	NullCount int
-	SpaceId   uint64
+	DBName    string				// 表库名
+	TableName string				// 表名
+	Columns   []Columns				// 列
+	Indexes   map[uint64]Indexes	// 索引
+	NullCount int					// 空列
+	SpaceId   uint64				//
 }
 
 // Store the table columns info.
 type Columns struct {
-	FieldName  string
-	FieldType  uint64
-	MySQLType  uint64
-	FieldPos   uint64
-	FieldLen   uint64
-	FieldValue interface{}
-	IsNUll     bool
-	IsBinary   bool
-	IsUnsigned bool
-	TableID    uint64
+	FieldName  string			// 字段名
+	FieldType  uint64			// 字段类型
+	MySQLType  uint64			//
+	FieldPos   uint64			//
+	FieldLen   uint64			//
+	FieldValue interface{}		//
+	IsNUll     bool				//
+	IsBinary   bool				//
+	IsUnsigned bool				//
+	TableID    uint64			//
 }
 
 // Store the table index info.
@@ -135,46 +135,47 @@ type SystemPageHeader struct {
 
 type Page struct {
 	// All MySQL page have this header.
+	// 文件头
 	fh FilHeader
 
 	// Only the index page have this header.
+	// 页头
 	ph PageHeader
 
 	// only system page have.
-	sp           SystemPageHeader
+	// 系统页头
+	sp SystemPageHeader
 
 	// Store the page data.
-	OriginalData []byte
-	data         []byte
+	OriginalData []byte	// 整个页的全部数据
+	data         []byte	// 页的数据部分
 }
 
 func NewParseIB() *ParseIB {
-	p := &ParseIB{}
-	TableMap := make(map[uint64]Tables)
-	d := new(sync.Map)
-	p.TableMap = TableMap
-	p.D = d
-	return p
+	return &ParseIB{
+		TableMap: make(map[uint64]Tables),
+		D: new(sync.Map),
+	}
 }
 
 // Parse the data file, The data file is composed of multiple pages,
 // each page is 16kb by default.
 func (P *ParseIB) ParseFile(path string) ([]Page, error) {
 
-	var AllPages []Page
+	// 打开文件
 	file, err := os.Open(path)
 	if err != nil {
 		logs.Error("Error while opening file, the err is ", err)
 		return nil, err
 	}
-
 	defer file.Close()
 
-	var PageMap map[uint64]string
-	PageMap = make(map[uint64]string)
+	var pages []Page
+	dedup := make(map[uint64]string)
 
 	for {
 		// Read a page from data file.
+		// 读取一个页
 		d, err := utils.ReadNextBytes(file, DefaultPageSize)
 		if len(d) < DefaultPageSize {
 			break
@@ -185,23 +186,27 @@ func (P *ParseIB) ParseFile(path string) ([]Page, error) {
 		}
 
 		// Parse the page file header.
+		// 解析页
 		p, err := P.ParseFilHeader(d)
 		if err != nil {
 			return nil, err
 		}
 
 		// Store the page.
+		// 保存页原始数据
 		p.OriginalData = d
 
 		// TODO: why have the same pages?
 		// Store the page into the PageMap.
-		_, ok := PageMap[p.fh.FIL_PAGE_OFFSET]
+		// 保存到 pages
+		_, ok := dedup[p.fh.FIL_PAGE_OFFSET]
 		if !ok {
-			AllPages = append(AllPages, p)
-			PageMap[p.fh.FIL_PAGE_OFFSET] = "have"
+			pages = append(pages, p)
+			dedup[p.fh.FIL_PAGE_OFFSET] = "have"
 		}
 	}
-	return AllPages, nil
+
+	return pages, nil
 }
 
 func SliceInsert(c []Columns, index int, value Columns) []Columns {
@@ -525,12 +530,14 @@ func (P *ParseIB) GetAllTables() error {
 // Get table struct in dict page.
 func (P *ParseIB) ParseDictPage(FilePath string) error {
 
+	// 解析页列表
 	pages, err := P.ParseFile(FilePath)
 	if err != nil {
 		logs.Error("parse system data file failed, the error is ", err)
 		return err
 	}
 
+	// 解析系统页
 	var SystemPage Page
 	for _, p := range pages {
 		if p.fh.FIL_PAGE_OFFSET == SystemPageIdx {
@@ -550,39 +557,42 @@ func (P *ParseIB) ParseDictPage(FilePath string) error {
 		//	P.ParseUndoPageHeader(&p)
 		//}
 
-		if p.fh.FIL_PAGE_OFFSET == SystemPage.sp.DICT_HDR_TABLES ||
+		if  p.fh.FIL_PAGE_OFFSET == SystemPage.sp.DICT_HDR_TABLES ||
 			p.fh.FIL_PAGE_OFFSET == SystemPage.sp.DICT_HDR_COLUMNS ||
 			p.fh.FIL_PAGE_OFFSET == SystemPage.sp.DICT_HDR_INDEXES ||
 			p.fh.FIL_PAGE_OFFSET == SystemPage.sp.DICT_HDR_FIELDS {
 
 			var ds []DataDict
 			P.ParsePageHeader(&p)
-			ds = append(ds,
-				DataDict{
-					IndexId: p.ph.PAGE_INDEX_ID,
-					PageOffset: p.fh.FIL_PAGE_OFFSET,
-					data: p.OriginalData,
-					pos: len(p.OriginalData) - len(p.data)})
+
+			ds = append(ds, DataDict{
+				IndexId: p.ph.PAGE_INDEX_ID,
+				PageOffset: p.fh.FIL_PAGE_OFFSET,
+				data: p.OriginalData,
+				pos: len(p.OriginalData) - len(p.data),
+			})
+
 			P.D.Store(p.ph.PAGE_INDEX_ID, ds)
 
-			logs.Debug("page offset is ", p.fh.FIL_PAGE_OFFSET,
-				"indexId is", p.ph.PAGE_INDEX_ID, " data len is ", len(ds))
+			logs.Debug("page offset is ", p.fh.FIL_PAGE_OFFSET, "indexId is", p.ph.PAGE_INDEX_ID, " data len is ", len(ds))
 
 		} else {
+
 			f := func(k, v interface{}) bool {
+
 				if k == p.ph.PAGE_INDEX_ID {
+
 					ds := v.([]DataDict)
 					P.ParsePageHeader(&p)
-					ds = append(ds,
-						DataDict{
-							IndexId: p.ph.PAGE_INDEX_ID,
-							PageOffset: p.fh.FIL_PAGE_OFFSET,
-							data: p.OriginalData,
-								pos: len(p.OriginalData) - len(p.data)})
+					ds = append(ds,DataDict{
+						IndexId: p.ph.PAGE_INDEX_ID,
+						PageOffset: p.fh.FIL_PAGE_OFFSET,
+						data: p.OriginalData,
+						pos: len(p.OriginalData) - len(p.data),
+					})
 					P.D.Store(p.ph.PAGE_INDEX_ID, ds)
 
-					logs.Debug("page offset is ", p.fh.FIL_PAGE_OFFSET,
-						"indexId is", p.ph.PAGE_INDEX_ID, " data len is ", len(ds))
+					logs.Debug("page offset is ", p.fh.FIL_PAGE_OFFSET, "indexId is", p.ph.PAGE_INDEX_ID, " data len is ", len(ds))
 				}
 				return true
 			}
@@ -628,7 +638,6 @@ func (P *ParseIB) ParseDictPage(FilePath string) error {
 }
 
 func (P *ParseIB) ParseSysPageHeader(page Page) (Page, error) {
-
 	pos := 0
 	d := page.data
 
@@ -685,8 +694,8 @@ func (P *ParseIB) ParseSysPageHeader(page Page) (Page, error) {
 	return page, nil
 }
 
+// 解析 Page
 func (P *ParseIB) ParseFilHeader(d []byte) (Page, error) {
-
 	var p Page
 	pos := 0
 
@@ -959,13 +968,13 @@ func (P *ParseIB) ParsePageHeader(page *Page) *Page {
 
 // Reference https://dev.mysql.com/doc/internals/en/innodb-page-overview.html
 // An InnoDB page has seven parts:
-// 1.Fil Header
-// 2.Page Header
-// 3.Infimum + Supremum Records
-// 4.User Records
-// 5.Free Space
-// 6.Page Directory
-// 7.Fil Trailer
+// 	1.Fil Header
+// 	2.Page Header
+// 	3.Infimum + Supremum Records
+//	4.User Records
+// 	5.Free Space
+// 	6.Page Directory
+// 	7.Fil Trailer
 // Read all those info and parse according to its protocol.
 // TODO: support compress and encrypt page.
 func (P *ParseIB) ParsePage(d []byte, pos int, columns []Columns, IsRecovery bool, PageFree uint64) [][]Columns {
